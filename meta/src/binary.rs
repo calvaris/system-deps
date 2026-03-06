@@ -137,6 +137,7 @@ where
     /// particular instance it would be hard to use this trait and it complicates error management.
     fn from_iter<I: IntoIterator<Item = (String, T)>>(binaries: I) -> Self {
         let mut res = Self::default();
+        let mut auto_detect = std::collections::HashSet::new();
 
         let (url_binaries, follow_binaries): (Vec<_>, Vec<_>) = binaries
             .into_iter()
@@ -151,10 +152,13 @@ where
                 };
 
                 let dst = Path::new(&crate::TARGET_DIR).join(&name);
-                res.paths.insert(
-                    name,
-                    bin.paths.iter().flatten().map(|p| dst.join(p)).collect(),
-                );
+                if let Some(ref paths) = bin.paths {
+                    res.paths
+                        .insert(name, paths.iter().map(|p| dst.join(p)).collect());
+                } else {
+                    auto_detect.insert(name.clone());
+                    res.paths.insert(name, Vec::new());
+                }
 
                 // Only refresh the binaries if there isn't already a valid copy
                 let valid = check_valid_dir(&dst, bin.checksum.as_deref())
@@ -166,6 +170,14 @@ where
                 }
             }
         });
+
+        // Auto-detect pkgconfig directories for packages that didn't specify paths
+        for name in &auto_detect {
+            let dst = Path::new(&crate::TARGET_DIR).join(name);
+            if let Some(list) = res.paths.get_mut(name) {
+                *list = find_pkgconfig_dirs(&dst);
+            }
+        }
 
         // Check if the package provided extra configuration
         for (name, list) in res.paths.iter_mut() {
@@ -227,6 +239,28 @@ impl Paths {
     pub fn to_string(&self) -> Result<String, Error> {
         Ok(toml::to_string(self)?)
     }
+}
+
+/// Iteratively scan `dir` for subdirectories named "pkgconfig" and return their paths.
+fn find_pkgconfig_dirs(dir: &Path) -> Vec<PathBuf> {
+    let mut result = Vec::new();
+    let mut queue = vec![dir.to_path_buf()];
+    while let Some(current) = queue.pop() {
+        let Ok(entries) = fs::read_dir(&current) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                if path.file_name().is_some_and(|n| n == "pkgconfig") {
+                    result.push(path);
+                } else {
+                    queue.push(path);
+                }
+            }
+        }
+    }
+    result
 }
 
 /// Checks if the target directory is valid and if binaries need to be redownloaded.
