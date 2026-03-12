@@ -339,11 +339,11 @@ impl MetaData {
 
                     dep.version_overrides.push(builder.build()?);
                 }
-                ("url", toml::Value::String(_)) => {}
-                ("checksum", toml::Value::String(_)) => {}
-                ("paths", toml::Value::Array(_)) => {}
-                ("provides", toml::Value::Array(_)) => {}
-                ("follows", toml::Value::String(_)) => {}
+                ("url", DeValue::String(_)) => {}
+                ("checksum", DeValue::String(_)) => {}
+                ("paths", DeValue::Array(_)) => {}
+                ("provides", DeValue::Array(_)) => {}
+                ("follows", DeValue::String(_)) => {}
                 _ => {
                     return Err(MetadataError::UnexpectedKey(
                         format!("{p_key}.{name}"),
