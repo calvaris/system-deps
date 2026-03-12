@@ -412,3 +412,76 @@ pub fn merge(rhs: &mut Table, lhs: Table, force: bool) -> Result<(), Error> {
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    fn create_temp_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("system_deps_test_{}", name));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn find_pkgconfig_empty_dir() {
+        let dir = create_temp_dir("empty");
+        let result = find_pkgconfig_dirs(&dir);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn find_pkgconfig_nonexistent_dir() {
+        let dir = PathBuf::from("/tmp/system_deps_test_nonexistent_dir_that_does_not_exist");
+        let result = find_pkgconfig_dirs(&dir);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn find_pkgconfig_single() {
+        let dir = create_temp_dir("single");
+        fs::create_dir_all(dir.join("lib/pkgconfig")).unwrap();
+        let result = find_pkgconfig_dirs(&dir);
+        assert_eq!(result, vec![dir.join("lib/pkgconfig")]);
+    }
+
+    #[test]
+    fn find_pkgconfig_multiple() {
+        let dir = create_temp_dir("multiple");
+        fs::create_dir_all(dir.join("lib/pkgconfig")).unwrap();
+        fs::create_dir_all(dir.join("share/pkgconfig")).unwrap();
+
+        let mut result = find_pkgconfig_dirs(&dir);
+        result.sort();
+        let mut expected = vec![dir.join("lib/pkgconfig"), dir.join("share/pkgconfig")];
+        expected.sort();
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn find_pkgconfig_nested_depths() {
+        let dir = create_temp_dir("nested");
+        fs::create_dir_all(dir.join("a/b/pkgconfig")).unwrap();
+        fs::create_dir_all(dir.join("c/pkgconfig")).unwrap();
+
+        let mut result = find_pkgconfig_dirs(&dir);
+        result.sort();
+        let mut expected = vec![dir.join("a/b/pkgconfig"), dir.join("c/pkgconfig")];
+        expected.sort();
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn find_pkgconfig_file_ignored() {
+        let dir = create_temp_dir("file_ignored");
+        // Create a file named "pkgconfig" — should be ignored
+        fs::write(dir.join("pkgconfig"), "not a directory").unwrap();
+        // Create a real pkgconfig dir elsewhere
+        fs::create_dir_all(dir.join("lib/pkgconfig")).unwrap();
+
+        let result = find_pkgconfig_dirs(&dir);
+        assert_eq!(result, vec![dir.join("lib/pkgconfig")]);
+    }
+}
