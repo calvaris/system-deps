@@ -57,7 +57,7 @@ tiny_http = "0.12"
 [features]
 default = []
 # FIXME: How can this be done when using resolver v2? Features are separated
-binary = ["system-deps-meta/binary"]
+binary = ["system-deps-meta/binary", "toml/serde"]
 gz = ["system-deps-meta/gz"]
 xz = ["system-deps-meta/xz"]
 zip = ["system-deps-meta/zip"]
