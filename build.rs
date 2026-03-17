@@ -20,7 +20,7 @@ mod binary {
         let metadata = read_metadata(BUILD_MANIFEST, "system-deps", merge)?;
 
         // Download the binaries and get their pkg_config paths
-        let paths: Paths = metadata.into_iter().collect();
+        let paths = Paths::from_binaries(metadata)?;
 
         // Write the binary paths to a file for later use
         let dest = Path::new(TARGET_DIR).join("paths.toml");
