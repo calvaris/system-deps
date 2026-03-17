@@ -164,7 +164,7 @@ pub fn read_metadata(
     let mut curr = Table::new();
 
     // Initialize the queue from the leaves
-    // NOTE: Use `extract_if` when it is available https://github.com/rust-lang/rust/issues/43244
+    // TODO: Use `extract_if` when MSRV >= 1.87 (stabilized in https://github.com/rust-lang/rust/issues/43244)
     let mut queue = VecDeque::new();
     let nodes: HashMap<&str, MetadataNode> = nodes
         .into_iter()

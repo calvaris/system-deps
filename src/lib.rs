@@ -247,7 +247,7 @@
 //! In this example, `libb` overwrites the binaries provided by `liba` (for compatibility reasons, to add flags needed by `libb`, to use a single package for both...).
 //! However, the user project overwrites them again to point at a local file for development.
 //!
-//! The binaries can be configured per target (TODO: per version) like other `system-deps` options:
+//! The binaries can be configured per target like other `system-deps` options:
 //!
 //! ```toml
 //! [package.metadata.system-deps.liba.'cfg(target = "unix")']
@@ -257,24 +257,16 @@
 //! url = "https://download/liba-windows-1.0.zip"
 //! ```
 //!
-//! TODO: Is this still true
 //! By default, a binary archive adds its paths to `PKG_CONFIG_PATH` only for the library it is defined for. However, sometimes you may want to share a single url
 //! for multiple libraries. While it is possible to repeat the url for every entry, a more concise approach is to use `follows` to copy the configuration from another library.
-//! If one binary is meant to be used everywhere, set the `global` (the ordering of multiple global binary sources is not guaranteed).
 //!
 //! ```toml
 //! [package.metadata.system-deps.libb]
 //! follows = "liba" # This name corresponds to the key of the metadata table
-//!
-//! [package.metadata.system-deps.libc]
-//! url = "file:///tmp/liba.tar.xz"
-//! global = true
 //! ```
 //!
-//! TODO: Complete examples
-//!
-//! Additionally, the environment variables `SYSTEM_DEPS_BINARY_URL`, `SYSTEM_DEPS_BINARY_CHECKSUM` and `SYSTEM_DEPS_BINARY_PKG_PATHS` can be used to set a single
-//! global binary url (for example, for local testing).
+//! TODO: The environment variables `SYSTEM_DEPS_BINARY_URL` and `SYSTEM_DEPS_BINARY_CHECKSUM` will allow setting a global
+//! binary url (for example, for local testing).
 
 #![deny(missing_docs)]
 
