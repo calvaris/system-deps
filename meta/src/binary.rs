@@ -2,7 +2,6 @@ use std::{
     collections::HashMap,
     convert::{TryFrom, TryInto},
     fs,
-    iter::FromIterator,
     path::{Path, PathBuf},
     sync::{Mutex, OnceLock},
     thread,
@@ -125,17 +124,13 @@ pub struct Paths {
     wildcards: HashMap<String, String>,
 }
 
-impl<T> FromIterator<(String, T)> for Paths
-where
-    Binary: TryFrom<T>,
-{
+impl Paths {
     /// Uses the metadata from the cargo manifests and the environment to build a list of urls
     /// from where to download binaries for dependencies and adds them to their `PKG_CONFIG_PATH`.
-    ///
-    /// This function may panic, but only on unrecoverable results such as downloading or
-    /// decompressing errors. While it would possible to pass these values to the caller, in this
-    /// particular instance it would be hard to use this trait and it complicates error management.
-    fn from_iter<I: IntoIterator<Item = (String, T)>>(binaries: I) -> Self {
+    pub fn from_binaries<T>(binaries: impl IntoIterator<Item = (String, T)>) -> Result<Self, Error>
+    where
+        Binary: TryFrom<T>,
+    {
         let mut res = Self::default();
         let mut auto_detect = std::collections::HashSet::new();
 
@@ -145,7 +140,9 @@ where
             .partition(|(_, bin)| matches!(bin, Binary::Url(_)));
 
         // Binaries with its own url
-        thread::scope(|s| {
+        let errors: Vec<BinaryError> = thread::scope(|s| {
+            let mut handles = Vec::new();
+
             for (name, bin) in url_binaries {
                 let Binary::Url(bin) = bin else {
                     unreachable!();
@@ -161,15 +158,25 @@ where
                 }
 
                 // Only refresh the binaries if there isn't already a valid copy
-                let valid = check_valid_dir(&dst, bin.checksum.as_deref())
-                    .unwrap_or_else(|e| panic!("{}", e));
+                let valid = check_valid_dir(&dst, bin.checksum.as_deref())?;
 
                 // Allow multiple downloads at the same time
                 if !valid {
-                    s.spawn(move || make_available(bin, &dst).map_err(|e| panic!("{}", e)));
+                    handles.push(s.spawn(move || make_available(bin, &dst)));
                 }
             }
-        });
+
+            Ok::<_, BinaryError>(
+                handles
+                    .into_iter()
+                    .filter_map(|h| h.join().expect("download thread panicked").err())
+                    .collect(),
+            )
+        })?;
+
+        if let Some(e) = errors.into_iter().next() {
+            return Err(e.into());
+        }
 
         // Auto-detect pkgconfig directories for packages that didn't specify paths
         for name in &auto_detect {
@@ -204,7 +211,7 @@ where
                 unreachable!();
             };
             if !res.paths.contains_key(&bin.follows) {
-                panic!("{}", BinaryError::InvalidFollows(name, bin.follows));
+                return Err(BinaryError::InvalidFollows(name, bin.follows).into());
             };
             match name.strip_suffix("*") {
                 Some(wildcard) => res.wildcards.insert(wildcard.into(), bin.follows),
@@ -212,7 +219,7 @@ where
             };
         }
 
-        res
+        Ok(res)
     }
 }
 
@@ -242,20 +249,27 @@ impl Paths {
 }
 
 /// Iteratively scan `dir` for subdirectories named "pkgconfig" and return their paths.
+/// Does not follow symlinks. Limited to `MAX_DEPTH` levels to avoid excessive traversal.
 fn find_pkgconfig_dirs(dir: &Path) -> Vec<PathBuf> {
+    const MAX_DEPTH: usize = 10;
+
     let mut result = Vec::new();
-    let mut queue = vec![dir.to_path_buf()];
-    while let Some(current) = queue.pop() {
+    let mut queue = vec![(dir.to_path_buf(), 0usize)];
+    while let Some((current, depth)) = queue.pop() {
         let Ok(entries) = fs::read_dir(&current) else {
             continue;
         };
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.is_dir() {
+            // Use symlink_metadata (lstat) to avoid following symlinks
+            let Ok(meta) = entry.metadata() else {
+                continue;
+            };
+            if meta.is_dir() {
                 if path.file_name().is_some_and(|n| n == "pkgconfig") {
                     result.push(path);
-                } else {
-                    queue.push(path);
+                } else if depth < MAX_DEPTH {
+                    queue.push((path, depth + 1));
                 }
             }
         }

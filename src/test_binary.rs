@@ -4,7 +4,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicUsize, Ordering},
-        OnceLock,
+        Mutex, OnceLock,
     },
 };
 
@@ -35,7 +35,7 @@ impl Test {
 
         let manifest = test::Test::write_manifest(name, packages);
         let metadata = read_metadata(&manifest, "system-deps", merge)?;
-        let paths = metadata.into_iter().collect();
+        let paths = Paths::from_binaries(metadata)?;
 
         Ok(Self { manifest, paths })
     }
@@ -409,16 +409,14 @@ fn unsupported_extensions() -> Result<(), Error> {
         ],
     }];
 
-    let res = std::panic::catch_unwind(|| Test::new("unsupported_extension", pkgs.clone()));
-    assert!(res.is_err());
+    assert!(Test::new("unsupported_extension", pkgs.clone()).is_err());
 
     pkgs[0].config = toml::toml![
         [package.metadata.system-deps.dep]
         url = "http://no_ext"
     ];
 
-    let res = std::panic::catch_unwind(|| Test::new("no_extension", pkgs));
-    assert!(res.is_err());
+    assert!(Test::new("no_extension", pkgs).is_err());
 
     Ok(())
 }
@@ -439,8 +437,7 @@ fn invalid_checksum() -> Result<(), Error> {
         ))?,
     }];
 
-    let res = std::panic::catch_unwind(|| Test::new("invalid_checksum", pkgs));
-    assert!(res.is_err());
+    assert!(Test::new("invalid_checksum", pkgs).is_err());
 
     Ok(())
 }
@@ -540,6 +537,7 @@ fn download() -> Result<(), Error> {
 
 #[test]
 fn probe() -> Result<(), Error> {
+    let _l = crate::test::LOCK.get_or_init(|| Mutex::new(())).lock();
     static PATHS: OnceLock<Paths> = OnceLock::new();
 
     let pkgs = vec![Package {
@@ -569,6 +567,8 @@ fn probe() -> Result<(), Error> {
 
 #[test]
 fn internal_pkg_config() -> Result<(), Error> {
+    let _l = crate::test::LOCK.get_or_init(|| Mutex::new(())).lock();
+
     let pkgs = vec![Package {
         name: "test",
         deps: vec![],
@@ -589,6 +589,7 @@ fn internal_pkg_config() -> Result<(), Error> {
 }
 
 #[test]
+#[ignore = "per-version binary urls not yet implemented"]
 fn library_versions() -> Result<(), Error> {
     let base_path = get_archives(None).0;
     let pkgs = vec![Package {

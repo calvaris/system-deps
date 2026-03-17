@@ -14,7 +14,7 @@ use super::{
     BuildFlags, BuildInternalClosureError, Config, EnvVariables, Error, InternalLib, Library,
 };
 
-static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+pub(crate) static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
 fn create_config(path: &str, env: Vec<(&'static str, &'static str)>) -> Config {
     {

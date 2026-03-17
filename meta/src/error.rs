@@ -44,10 +44,12 @@ impl fmt::Display for Error {
             Self::IncompatibleMerge => write!(f, "Can't merge metadata"),
             Self::PackageNotFound(s) => write!(f, "Package not found: {}", s),
             Self::SerializeError(e) => write!(f, "Error while parsing: {}", e),
+            Self::InvalidCfg(e) => write!(f, "Invalid cfg() expression: {}", e),
             Self::UnsupportedCfg(s) => {
                 write!(f, "Unsupported cfg() expression: {}", s)
             }
-            e => e.fmt(f),
+            #[cfg(feature = "binary")]
+            Self::Binary(e) => e.fmt(f),
         }
     }
 }
