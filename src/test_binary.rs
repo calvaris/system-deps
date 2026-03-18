@@ -15,7 +15,7 @@ use system_deps_meta::{
     error::Error,
     parse::read_metadata,
     test::{self, assert_set, Package},
-    BUILD_MANIFEST, TARGET_DIR,
+    BUILD_MANIFEST, TARGET, TARGET_DIR,
 };
 
 use crate::{BuildInternalClosureError, Config, EnvVariables, Library};
@@ -610,4 +610,90 @@ fn library_versions() -> Result<(), Error> {
     let _test = Test::new("library_versions", pkgs)?;
     // assert_paths(test.paths.get("dep"), &["dep/lib/pkgconfig"]);
     todo!();
+}
+
+#[test]
+fn templated_url() -> Result<(), Error> {
+    let pkgs = vec![Package {
+        name: "dep",
+        deps: vec![],
+        config: toml::toml![
+            [package.metadata.system-deps.dep]
+            url = "$TEST"
+            paths = [ "lib/pkgconfig" ]
+        ],
+    }];
+
+    // The template expansion happens on the URL before download. Since $TEST is
+    // replaced by replace_paths to a file:// URL, we can't easily test URL templates
+    // in integration tests. The unit tests in binary.rs cover expand_template directly.
+    let test = Test::new("templated_url", pkgs)?;
+    assert_paths(test.paths.get("dep"), &["dep/lib/pkgconfig"]);
+
+    Ok(())
+}
+
+#[test]
+#[cfg(feature = "gz")]
+fn checksum_per_target() -> Result<(), Error> {
+    let base_path = get_archives(None).0;
+    let gz_checksum = "5135f7d6b869ae8802228aed4328f2aecf8f38ba597da89ced03b30d6afc3a35";
+
+    let config_str = format!(
+        r#"
+            [package.metadata.system-deps.dep]
+            name = "dep"
+            version = "1.2.3"
+            url = "file://{}/test.tar.gz"
+            paths = ["lib/pkgconfig"]
+
+            [package.metadata.system-deps.dep.checksum]
+            {} = "{}"
+            other-unknown-target = "wrong_checksum"
+        "#,
+        base_path.display(),
+        TARGET,
+        gz_checksum,
+    );
+
+    let pkgs = vec![Package {
+        name: "dep",
+        deps: vec![],
+        config: toml::from_str(&config_str)?,
+    }];
+
+    let test = Test::new("checksum_per_target", pkgs)?;
+    assert_paths(test.paths.get("dep"), &["dep/lib/pkgconfig"]);
+
+    Ok(())
+}
+
+#[test]
+#[cfg(feature = "gz")]
+fn checksum_per_target_missing() -> Result<(), Error> {
+    let base_path = get_archives(None).0;
+
+    let config_str = format!(
+        r#"
+            [package.metadata.system-deps.dep]
+            name = "dep"
+            version = "1.2.3"
+            url = "file://{}/test.tar.gz"
+            paths = ["lib/pkgconfig"]
+
+            [package.metadata.system-deps.dep.checksum]
+            other-unknown-target = "some_checksum"
+        "#,
+        base_path.display(),
+    );
+
+    let pkgs = vec![Package {
+        name: "dep",
+        deps: vec![],
+        config: toml::from_str(&config_str)?,
+    }];
+
+    assert!(Test::new("checksum_per_target_missing", pkgs).is_err());
+
+    Ok(())
 }
