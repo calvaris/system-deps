@@ -14,3 +14,6 @@ pub const BUILD_MANIFEST: &str = env!("SYSTEM_DEPS_BUILD_MANIFEST");
 
 /// Directory where `system-deps` related build products will be stored.
 pub const TARGET_DIR: &str = env!("SYSTEM_DEPS_TARGET_DIR");
+
+/// The target triple for the current build.
+pub const TARGET: &str = env!("TARGET");
