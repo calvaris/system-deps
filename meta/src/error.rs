@@ -77,14 +77,6 @@ mod binary {
         LocalFileError(io::Error),
         /// Error when creating the symlinks to the local folder.
         SymlinkError(io::Error),
-        /// The target triple is not recognized by cfg-expr.
-        UnknownTarget(String),
-        /// A placeholder in a template URL is not a recognized variable.
-        UnknownTemplateVariable(String),
-        /// A template variable is valid but has no value for the current target.
-        MissingTemplateVariable(String, String),
-        /// The per-target checksum table does not contain an entry for the current target.
-        MissingTargetChecksum(String),
         /// The binary archive extension is not currently supported.
         UnsupportedExtension(String),
     }
@@ -131,26 +123,6 @@ mod binary {
                 }
                 Self::SymlinkError(e) => {
                     write!(f, "Couldn't create symlink to local binary folder: {}", e)
-                }
-                Self::UnknownTarget(t) => {
-                    write!(f, "Unknown target triple: {}", t)
-                }
-                Self::UnknownTemplateVariable(v) => {
-                    write!(f, "Unknown template variable in URL: {}", v)
-                }
-                Self::MissingTemplateVariable(v, t) => {
-                    write!(
-                        f,
-                        "Template variable {} has no value for target {}",
-                        v, t
-                    )
-                }
-                Self::MissingTargetChecksum(t) => {
-                    write!(
-                        f,
-                        "Per-target checksum table has no entry for target {}",
-                        t
-                    )
                 }
                 Self::UnsupportedExtension(s) => {
                     write!(f, "Unsupported binary extension for {}", s)
