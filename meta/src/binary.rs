@@ -25,6 +25,9 @@ pub enum Extension {
     /// A `.zip` archive.
     #[cfg(feature = "zip")]
     Zip,
+    /// A macOS `.pkg` (Apple flat package) archive.
+    #[cfg(feature = "pkg")]
+    Pkg,
     Folder,
 }
 
@@ -45,6 +48,8 @@ impl TryFrom<&Path> for Extension {
             return Err(BinaryError::UnsupportedExtension("<error>".into()));
         };
         match ext {
+            #[cfg(feature = "pkg")]
+            e if e == "pkg" => Ok(Extension::Pkg),
             #[cfg(feature = "gz")]
             e if e == "gz" || e == "tgz" => Ok(Extension::TarGz),
             #[cfg(feature = "xz")]
@@ -419,6 +424,15 @@ fn decompress(_file: &[u8], _dst: &Path, ext: Extension) -> Result<(), BinaryErr
             archive
                 .extract(_dst)
                 .map_err(|e| BinaryError::DecompressError(e.into()))
+        }
+        #[cfg(feature = "pkg")]
+        Extension::Pkg => {
+            let reader = std::io::Cursor::new(_file);
+            pkg_extractor::PkgExtractor::new(reader, Some(_dst.into()))
+                .extract()
+                .map_err(|e| {
+                    BinaryError::DecompressError(std::io::Error::other(format!("{e:?}")))
+                })
         }
         _ => unreachable!(),
     }
