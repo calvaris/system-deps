@@ -10,8 +10,6 @@ use std::{
 use serde::{Deserialize, Serialize};
 use toml::{Table, Value};
 
-use cfg_expr::targets::get_builtin_target_by_triple;
-
 use crate::error::{BinaryError, Error};
 
 /// The extension of the binary archive.
@@ -96,32 +94,6 @@ pub struct FollowBinary {
     follows: String,
 }
 
-/// Checksum specification for a binary archive. Can be either a single literal value
-/// or a table mapping target triples to their respective checksums.
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
-pub enum Checksum {
-    /// A single checksum value (backwards compatible).
-    Value(String),
-    /// A table mapping target triples to checksums, for multi-platform URLs.
-    PerTarget(HashMap<String, String>),
-}
-
-/// Resolve a `Checksum` enum into a plain checksum string for the current target.
-fn resolve_checksum(checksum: Option<&Checksum>) -> Result<Option<String>, BinaryError> {
-    match checksum {
-        None => Ok(None),
-        Some(Checksum::Value(s)) => Ok(Some(s.clone())),
-        Some(Checksum::PerTarget(map)) => {
-            let triple = env!("TARGET");
-            map.get(triple)
-                .cloned()
-                .map(Some)
-                .ok_or_else(|| BinaryError::MissingTargetChecksum(triple.into()))
-        }
-    }
-}
-
 /// Represents one location from where to download prebuilt binaries.
 #[derive(Debug, Deserialize)]
 pub struct UrlBinary {
@@ -138,10 +110,7 @@ pub struct UrlBinary {
     /// Optionally, a checksum of the downloaded archive. When set, it is used to correctly cache
     /// the result. If this is not specified, it will still be cached by cargo, but redownloads
     /// might happen more often. It has no effect if `url` is a local folder.
-    ///
-    /// Can be either a plain string (literal checksum) or a table mapping target triples to
-    /// checksums for multi-platform URL templates.
-    checksum: Option<Checksum>,
+    checksum: Option<String>,
     /// A list of relative paths inside the binary archive that point to a folder containing
     /// package config files. These directories will be prepended to the `PKG_CONFIG_PATH` when
     /// compiling the affected libraries.
@@ -188,18 +157,12 @@ impl Paths {
                     res.paths.insert(name, Vec::new());
                 }
 
-                // Expand URL templates and resolve checksum for the current target
-                let expanded_url = expand_template(&bin.url)?;
-                let resolved_checksum = resolve_checksum(bin.checksum.as_ref())?;
-
                 // Only refresh the binaries if there isn't already a valid copy
-                let valid = check_valid_dir(&dst, resolved_checksum.as_deref())?;
+                let valid = check_valid_dir(&dst, bin.checksum.as_deref())?;
 
                 // Allow multiple downloads at the same time
                 if !valid {
-                    handles.push(s.spawn(move || {
-                        make_available(&expanded_url, resolved_checksum.as_deref(), &dst)
-                    }));
+                    handles.push(s.spawn(move || make_available(bin, &dst)));
                 }
             }
 
@@ -285,62 +248,6 @@ impl Paths {
     }
 }
 
-/// Expand template variables in a string. Variables use the `{variable}` syntax.
-/// If the string contains no `{`, it is returned unchanged.
-///
-/// Supported variables: `{target_triple}`, `{target_os}`, `{target_arch}`,
-/// `{target_env}`, `{target_vendor}`, `{target_family}`.
-fn expand_template(template: &str) -> Result<String, BinaryError> {
-    if !template.contains('{') {
-        return Ok(template.to_string());
-    }
-
-    let triple = env!("TARGET");
-    let target = get_builtin_target_by_triple(triple)
-        .ok_or_else(|| BinaryError::UnknownTarget(triple.into()))?;
-
-    let replacements: &[(&str, Option<&str>)] = &[
-        ("{target_triple}", Some(target.triple.as_str())),
-        ("{target_arch}", Some(target.arch.as_str())),
-        (
-            "{target_os}",
-            target.os.as_ref().map(|o| o.as_str()),
-        ),
-        (
-            "{target_env}",
-            target.env.as_ref().map(|e| e.as_str()),
-        ),
-        (
-            "{target_vendor}",
-            target.vendor.as_ref().map(|v| v.as_str()),
-        ),
-        (
-            "{target_family}",
-            target.families.first().map(|f| f.as_str()),
-        ),
-    ];
-
-    let mut result = template.to_string();
-    for &(placeholder, value) in replacements {
-        if result.contains(placeholder) {
-            let val = value.ok_or_else(|| {
-                BinaryError::MissingTemplateVariable(placeholder.into(), triple.into())
-            })?;
-            result = result.replace(placeholder, val);
-        }
-    }
-
-    // Check for unresolved placeholders
-    if let Some(start) = result.find('{') {
-        if let Some(end) = result[start..].find('}') {
-            let unknown = &result[start..start + end + 1];
-            return Err(BinaryError::UnknownTemplateVariable(unknown.into()));
-        }
-    }
-
-    Ok(result)
-}
-
 /// Iteratively scan `dir` for subdirectories named "pkgconfig" and return their paths.
 /// Does not follow symlinks. Limited to `MAX_DEPTH` levels to avoid excessive traversal.
 fn find_pkgconfig_dirs(dir: &Path) -> Vec<PathBuf> {
@@ -396,16 +303,14 @@ fn check_valid_dir(dst: &Path, checksum: Option<&str>) -> Result<bool, BinaryErr
 
 /// Retrieve a binary archive from the specified `url` and decompress it in the target directory.
 /// "Download" is used as an umbrella term, since this can also be a local file.
-///
-/// The `url` and `checksum` should already be resolved (templates expanded, per-target lookup done).
-fn make_available(url: &str, checksum: Option<&str>, dst: &Path) -> Result<(), BinaryError> {
+fn make_available(bin: UrlBinary, dst: &Path) -> Result<(), BinaryError> {
     // TODO: Find a way of printing download/decompress progress
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
     // Check whether the file is local or not
-    let (url, local) = match url.strip_prefix("file://") {
+    let (url, local) = match bin.url.strip_prefix("file://") {
         Some(file) => (file, true),
-        None => (url, false),
+        None => (bin.url.as_str(), false),
     };
 
     let ext = url.try_into()?;
@@ -438,16 +343,11 @@ fn make_available(url: &str, checksum: Option<&str>, dst: &Path) -> Result<(), B
 
     // Verify the checksum
     let calculated = sha256::digest(&*file);
-    let checksum = match checksum {
-        Some(ch) if ch == calculated => Ok(ch.to_string()),
-        Some(ch) => Err(BinaryError::InvalidChecksum(
+    let checksum = match bin.checksum {
+        Some(ch) if *ch == calculated => Ok(ch),
+        _ => Err(BinaryError::InvalidChecksum(
             url.into(),
-            ch.into(),
-            calculated,
-        )),
-        None => Err(BinaryError::InvalidChecksum(
-            url.into(),
-            "<empty>".into(),
+            bin.checksum.unwrap_or("<empty>".into()),
             calculated,
         )),
     }?;
@@ -457,7 +357,42 @@ fn make_available(url: &str, checksum: Option<&str>, dst: &Path) -> Result<(), B
     // Decompress the binary archive
     decompress(&file, dst, ext)?;
 
+    // Generate info.toml with auto-detected pkgconfig paths
+    create_info_file(dst)?;
+
     Ok(())
+}
+
+/// Generate an `info.toml` file listing all directories containing `.pc` files.
+/// Skips generation if `info.toml` already exists.
+fn create_info_file(dst: &Path) -> Result<(), BinaryError> {
+    let info_path = dst.join("info.toml");
+    if info_path.exists() {
+        return Ok(());
+    }
+
+    let pc_dirs: Vec<String> = find_pkgconfig_dirs(dst)
+        .into_iter()
+        .filter_map(|p| {
+            p.strip_prefix(dst)
+                .ok()
+                .map(|rel| rel.to_string_lossy().into_owned())
+        })
+        .collect();
+
+    let mut table = toml::Table::new();
+    table.insert(
+        "paths".to_string(),
+        toml::Value::Array(pc_dirs.into_iter().map(toml::Value::String).collect()),
+    );
+
+    fs::write(
+        info_path,
+        toml::to_string(&table).map_err(|e| {
+            BinaryError::DecompressError(std::io::Error::other( e))
+        })?,
+    )
+    .map_err(BinaryError::DecompressError)
 }
 
 /// Extract a binary archive to the target directory. The methods for unpacking are
@@ -599,75 +534,4 @@ mod tests {
         assert_eq!(result, vec![dir.join("lib/pkgconfig")]);
     }
 
-    #[test]
-    fn expand_template_no_placeholders() {
-        let url = "https://example.com/archive.tar.gz";
-        assert_eq!(expand_template(url).unwrap(), url);
-    }
-
-    #[test]
-    fn expand_template_triple() {
-        let result = expand_template("https://example.com/{target_triple}.tar.gz").unwrap();
-        assert_eq!(
-            result,
-            format!("https://example.com/{}.tar.gz", env!("TARGET"))
-        );
-    }
-
-    #[test]
-    fn expand_template_components() {
-        let result =
-            expand_template("https://example.com/{target_os}-{target_arch}.tar.gz").unwrap();
-        let target =
-            get_builtin_target_by_triple(env!("TARGET")).expect("known target");
-        let expected = format!(
-            "https://example.com/{}-{}.tar.gz",
-            target.os.as_ref().unwrap().as_str(),
-            target.arch.as_str()
-        );
-        assert_eq!(result, expected);
-    }
-
-    #[test]
-    fn expand_template_unknown_variable() {
-        let result = expand_template("https://example.com/{target_foo}.tar.gz");
-        assert!(matches!(
-            result,
-            Err(BinaryError::UnknownTemplateVariable(_))
-        ));
-    }
-
-    #[test]
-    fn resolve_checksum_none() {
-        assert!(resolve_checksum(None).unwrap().is_none());
-    }
-
-    #[test]
-    fn resolve_checksum_value() {
-        let ch = Checksum::Value("abc123".into());
-        assert_eq!(resolve_checksum(Some(&ch)).unwrap(), Some("abc123".into()));
-    }
-
-    #[test]
-    fn resolve_checksum_per_target_found() {
-        let mut map = HashMap::new();
-        map.insert(env!("TARGET").to_string(), "correct_hash".into());
-        map.insert("other-target".to_string(), "other_hash".into());
-        let ch = Checksum::PerTarget(map);
-        assert_eq!(
-            resolve_checksum(Some(&ch)).unwrap(),
-            Some("correct_hash".into())
-        );
-    }
-
-    #[test]
-    fn resolve_checksum_per_target_missing() {
-        let mut map = HashMap::new();
-        map.insert("other-target".to_string(), "other_hash".into());
-        let ch = Checksum::PerTarget(map);
-        assert!(matches!(
-            resolve_checksum(Some(&ch)),
-            Err(BinaryError::MissingTargetChecksum(_))
-        ));
-    }
 }
