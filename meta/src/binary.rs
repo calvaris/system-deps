@@ -388,9 +388,8 @@ fn create_info_file(dst: &Path) -> Result<(), BinaryError> {
 
     fs::write(
         info_path,
-        toml::to_string(&table).map_err(|e| {
-            BinaryError::DecompressError(std::io::Error::other( e))
-        })?,
+        toml::to_string(&table)
+            .map_err(|e| BinaryError::DecompressError(std::io::Error::other(e)))?,
     )
     .map_err(BinaryError::DecompressError)
 }
@@ -533,5 +532,4 @@ mod tests {
         let result = find_pkgconfig_dirs(&dir);
         assert_eq!(result, vec![dir.join("lib/pkgconfig")]);
     }
-
 }

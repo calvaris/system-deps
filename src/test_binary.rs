@@ -610,4 +610,3 @@ fn library_versions() -> Result<(), Error> {
     // assert_paths(test.paths.get("dep"), &["dep/lib/pkgconfig"]);
     todo!();
 }
-
